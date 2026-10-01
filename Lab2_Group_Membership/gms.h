@@ -1,0 +1,3 @@
+#define DEFAULT_PORT        10000
+#define MAX_MISSED_PINGS    3
+#define HEARTBEAT_INTERVAL  2  

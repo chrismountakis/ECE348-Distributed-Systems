@@ -1,0 +1,128 @@
+Stage 1 — Basic interpreter
+
+  math.ss - arithmetic and variables
+  # Terminal A  (python runtime.py)
+  >> run tests/math.ss
+  
+  args.ss - argument passing
+  >> run tests/args.ss hello
+
+  slow_a.ss + slow_b.ss — concurrent thread scheduling
+  >> run tests/slow_a.ss
+  >> run tests/slow_b.ss                                                        
+
+Stage 2 - Local tuple space
+  
+  tuple_out.ss + tuple_in.ss - blocking IN waits for OUT
+  >> run tests/tuple_in.ss
+  >> run tests/tuple_out.ss
+  Expected: consumer blocks, then prints got 42, then got 99 after producer sleeps and OUTs them.
+  
+  local_rd.ss - RD is non-destructive
+  >> run tests/local_rd.ss
+  Expected: two RDs both read the same tuple, IN removes it. Prints PASS.
+  
+  wildcard.ss - multi-field wildcard matching
+  >> run tests/wildcard.ss
+  Expected:
+  RD all-wildcard (expect n=1 s=hello): n= 1 s= hello
+  IN first-exact  (expect s2=hello):    s2= hello
+  IN second-exact (expect n2=2):        n2= 2
+  PASS
+
+
+Stage 3 - Distributed communication
+  
+  dist_producer.ss + dist_consumer.ss — remote RD and IN
+  # Terminal A  (python runtime.py)
+  >> run tests/dist_consumer.ss
+  
+  # Terminal B  (python runtime.py 10001)
+  >> run tests/dist_producer.ss
+  Consumer must block, then print Test 1-4 results in order, including IN got (expect 20).
+
+  race_producer.ss + 2x race_consumer.ss - IN mutual exclusion
+  # Terminal A  (python runtime.py)
+  >> run tests/race_consumer.ss
+  
+  # Terminal B  (python runtime.py 10001)
+  >> run tests/race_consumer.ss
+  
+  # Terminal C  (python runtime.py 10002)
+  >> run tests/race_producer.ss
+  Expected: each (job, N) tuple is consumed by exactly one consumer - neither consumer prints twice for the same value.
+
+
+Stage 4 — Migration
+
+  migrate_sleep.ss — migrate a sleeping thread
+  # Terminal A  (python runtime.py)
+  >> run tests/migrate_sleep.ss
+  >> list                         
+  
+  # Terminal B  (python runtime.py 10001)
+  # (in A)
+  >> migrate 192.168.1.x:10000-0 <B_ip> 10001
+  Expected: B prints Arrived from ..., then woke up after sleep when the remaining time elapses. 
+  TID in B's list output must be identical to the one from A.
+  
+  migrate_block.ss + send_wake.ss - migrate a blocked thread then satisfy it
+  # Terminal A  (python runtime.py)
+  >> run tests/migrate_block.ss
+  >> list                         # note TID
+  
+  # (in A)
+  >> migrate <tid> <B_ip> 10001
+  
+  # Terminal B  (python runtime.py 10001)
+  >> run tests/send_wake.ss
+  Expected: blocked thread arrives on B, then unblocks when send_wake.ss puts (WAKE, 99) into B's tuple space. Prints unblocked - got value: 99.
+
+  
+Stage 4 - Load balancing
+  
+  lb_test.ss — automatic migration equalises thread count
+  # Terminal A  (python runtime.py)
+  >> run tests/lb_test.ss
+  >> run tests/lb_test.ss
+  >> run tests/lb_test.ss
+  >> run tests/lb_test.ss
+  
+  # Terminal B  (python runtime.py 10001) — join while A is running
+  Expected: within a few seconds B prints Arrived from ... for roughly half the threads, and both list commands show ~2 threads each.
+
+
+Stage 4 - Shutdown
+  
+  Shutdown when alone
+  # Terminal A  only (python runtime.py)
+  >> run tests/lb_test.ss
+  >> shutdown
+  Expected: prints No peers available. Shutdown cancel. Thread still visible with list.
+
+  Shutdown with a peer - thread and tuple space migrate
+  # Terminal A  (python runtime.py)
+  >> run tests/lb_test.ss
+  >> shutdown
+  
+  # Terminal B  (python runtime.py 10001)
+  Expected: A prints Shutdown complete. B prints Arrived from ... and shows the thread in its list.
+
+
+Shutdown correctly refused after peer leaves
+  # Terminal A                              Terminal B
+  >> run tests/lb_test.ss                   
+                                            >> exit
+  # wait for A to print "Peer left"         
+  >> shutdown
+  Expected: A prints No peers available. Shutdown cancel - it does NOT silently shut down and abandon the thread. Without the fix, A would see the stale peer,
+  attempt migration to the dead B, fail, and exit anyway.
+  
+  Registry cleaned up after peer exits — prevents ghost NOTIFY attempts
+  # Terminal A                              Terminal B
+                                            >> run tests/deadlock.ss
+  # wait for A to print "REGISTER from B..."
+                                            >> exit
+  # wait for A to print "Peer left"         
+  >> run tests/send_never.ss
+  Expected: A does NOT print any NOTIFY -> B line after B left.

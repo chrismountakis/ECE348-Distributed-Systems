@@ -1,0 +1,5 @@
+#SIMPLESCRIPT
+PRN "sleeping 200s"
+SLP 200
+PRN "done"
+RET
